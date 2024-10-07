@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Seismic Activity Graph</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #000;  /* Space-like black background */
+            color: #fff;  /* White text for contrast */
+            font-family: 'Courier New', Courier, monospace;  /* Futuristic font style */
+            margin: 0;  /* Remove default margin */
+            height: 100vh;  /* Full height for the body */
+            display: flex;  /* Flexbox layout */
+            flex-direction: column;  /* Stack elements vertically */
+            justify-content: center;  /* Center elements vertically */
+            align-items: center;  /* Center elements horizontally */
+        }
+
+        h2 {
+            text-align: center;
+            color: #00ffdd;  /* Neon teal for a space theme */
+            font-size: 2rem;
+            margin-bottom: 10px;  /* Spacing below heading */
+        }
+
+        canvas {
+            width: 80%;  /* Width of the canvas */
+            height: 50vh;  /* Height of the canvas (half the viewport height) */
+        }
+
+        p {
+            text-align: center;
+            font-size: 1.2rem;
+            margin: 10px 0;  /* Spacing above and below paragraph */
+        }
+
+        button {
+            display: block;
+            margin: 20px auto;
+            padding: 10px 20px;
+            background-color: #00ffdd;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            font-size: 1.1rem;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #00bbaa;
+        }
+    </style>
+</head>
+<body>
+    <h2>Real-Time Seismic Activity Monitoring</h2>
+    <canvas id="myChart"></canvas>
+    <div>
+        <p>Previous Standard Deviation: <span id="stdDisplay">0</span></p>
+        <button id="resetButton">Reset STD</button>
+    </div>
+
+    <script>
+        let ctx = document.getElementById('myChart').getContext('2d');
+        let chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],  // Time labels
+                datasets: [{
+                    label: 'Seismic Activity',
+                    data: [],  // Value data points
+                    borderColor: 'rgba(75, 192, 192, 1)',  // Default line color (blue for no seismic activity)
+                    borderWidth: 2,
+                    fill: false,
+                    pointRadius: 2,  // Smaller size for blue points
+                    pointHoverRadius: 4,  // Slightly larger on hover
+                    pointBackgroundColor: 'rgba(75, 192, 192, 1)'  // Color of the blue points
+                },
+                {
+                    label: '',
+                    data: [],  // Significant points
+                    borderColor: 'rgba(255, 0, 0, 1)',  // Red line for significant activity
+                    borderWidth: 0,  // No line connecting red points
+                    fill: false,
+                    pointRadius: 5,  // Size for significant points
+                    pointHoverRadius: 7,
+                    pointBackgroundColor: 'rgba(255, 0, 0, 1)'  // Color of the significant points
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            color: '#ffffff'
+                        },
+                        ticks: {
+                            color: '#ffffff',
+                            // Truncate decimals by using a callback function
+                            callback: function(value) {
+                                return Math.floor(value)+73300;  // Truncate to whole number
+                            }
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Seismic Value',
+                            color: '#ffffff'
+                        },
+                        ticks: {
+                            color: '#ffffff'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: {
+                            generateLabels: function(chart) {
+                                let labels = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                                labels[0].text = "No Seismic Activity (Blue Points)";
+                                labels.push({
+                                    text: 'Significant Seismic Activity (Red Points)',
+                                    fillStyle: 'red',
+                                    strokeStyle: 'red',
+                                    lineWidth: 0
+                                });
+                                return labels;
+                            },
+                            color: '#ffffff'
+                        }
+                    }
+                },
+                layout: {
+                    padding: {
+                        top: 20
+                    }
+                }
+            }
+        });
+
+        let currentIndex = 0;  // Start at the first data point
+        let allValues = [];    // Array to store all values for std calculation
+        let previousStd = 1;   // Store the previous standard deviation
+        let significantActivitySegments = []; // Store significant activity segments
+
+        // Function to calculate standard deviation
+        function calculateStd(arr) {
+            if (arr.length === 0) return 0;
+            let mean = arr.reduce((a, b) => a + b) / arr.length;
+            let variance = arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / arr.length;
+            if (Math.sqrt(variance)==0){return 1}
+            return Math.sqrt(variance);
+        }
+
+        // Update the STD display
+        function updateStdDisplay(std) {
+            document.getElementById('stdDisplay').textContent = std.toFixed(2);
+        }
+
+        // Function to fetch new data every second
+        function updateData() {
+            fetch(`/get_data/${currentIndex}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.time && data.value) {
+                        
+                        let value = parseFloat(data.value);
+                        allValues.push(value);
+
+                        // Calculate the new standard deviation (current one)
+                        let currentStd = calculateStd(allValues);
+
+                        let mean = allValues.reduce((a, b) => a + b) / allValues.length;
+
+                        // Check if the new data point is significant compared to the previous standard deviation
+                        let isSignificant = (Math.abs(value - mean) > 5 * previousStd && Math.abs(value - mean)>2e-9);
+
+                        // Add the new data point to the main dataset
+                        chart.data.labels.push(data.time);
+                        chart.data.datasets[0].data.push(value);
+                        chart.data.datasets[0].pointBackgroundColor = chart.data.datasets[0].data.map(() => 'rgba(75, 192, 192, 1)');  // Default point color
+
+                        // If significant, add to significant activity dataset
+                        if (isSignificant) {
+                            significantActivitySegments.push({x: data.time, y: value});
+                        }
+
+                        // Update significant dataset
+                        chart.data.datasets[1].data = significantActivitySegments;
+
+                        // Update the chart
+                        chart.update();
+
+                        // Update the standard deviation display with the previous std (before updating)
+                        updateStdDisplay(previousStd);
+                        previousStd=currentStd;
+
+                        // Now set the previous standard deviation to the current one
+                        previousStd = currentStd;
+
+                        currentIndex++;  // Move to the next data point
+                    }
+                });
+        }
+
+        // Function to reset data and STD calculation
+        function resetData() {
+           
+            previousStd = 0;  // Reset the previous standard deviation
+            significantActivitySegments = [];  // Reset significant segments
+            chart.update();
+            updateStdDisplay(previousStd);  // Reset STD display to 0
+        }
+
+        // Add event listener to reset button
+        document.getElementById('resetButton').addEventListener('click', resetData);
+
+        // Update the graph every 1 second
+        setInterval(updateData, 0);
+    </script>
+</body>
+</html>
